@@ -93,9 +93,49 @@
 @layer base {
   * {
     @apply border-border;
+    scroll-behavior: smooth;
   }
 
   body {
     @apply bg-background text-foreground;
+    font-feature-settings: "ss01", "ss02", "cv01", "cv02";
+  }
+}
+
+@layer components {
+  .container-padding {
+    @apply px-4 md:px-8 lg:px-12 xl:px-0;
+  }
+  
+  .scroll-container {
+    @apply overflow-y-auto overscroll-contain;
+    scroll-snap-type: y proximity;
+  }
+
+  .scroll-section {
+    scroll-snap-align: start;
+    scroll-snap-stop: always;
+  }
+
+  .hero-gradient {
+    @apply bg-gradient-to-br from-eventease-500 to-eventease-700;
+  }
+
+  .card-hover {
+    @apply transition-all duration-300 hover:shadow-lg hover:scale-[1.01];
+  }
+
+  .btn-primary {
+    @apply bg-eventease-600 hover:bg-eventease-700 text-white font-medium py-2 px-4 rounded-md transition-all duration-200;
+  }
+
+  .btn-secondary {
+    @apply bg-white hover:bg-gray-100 text-eventease-600 font-medium py-2 px-4 rounded-md shadow-sm border border-gray-200 transition-all duration-200;
+  }
+
+  .input-field {
+    @apply rounded-md border border-gray-300 px-3 py-2 text-gray-900 placeholder-gray-400 
+    focus:outline-none focus:ring-2 focus:ring-eventease-500 focus:border-transparent
+    transition-all duration-200;
   }
 }
