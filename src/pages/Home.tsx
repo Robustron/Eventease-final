@@ -1,4 +1,3 @@
-
 import { motion } from "framer-motion";
 import { Link } from "react-router-dom";
 import Navbar from "@/components/Navbar";
@@ -49,10 +48,10 @@ const Home = () => {
               </p>
               <div className="flex flex-col sm:flex-row space-y-4 sm:space-y-0 sm:space-x-4 justify-center md:justify-start">
                 <Link
-                  to="/inquire"
+                  to="/customer/login"
                   className="btn-secondary hover:bg-white/90 text-lg px-8 py-3 rounded-md"
                 >
-                  Submit Inquiry
+                  Submit Inquiry / Get Started
                 </Link>
                 <Link
                   to="/organizer/login"
@@ -154,7 +153,7 @@ const Home = () => {
 
           <div className="text-center mt-12">
             <Link
-              to="/inquire"
+              to="/customer/login"
               className="btn-primary inline-block px-8 py-3 text-lg"
             >
               Get Started Today
@@ -241,16 +240,16 @@ const Home = () => {
               </p>
               <div className="flex flex-col sm:flex-row justify-center space-y-4 sm:space-y-0 sm:space-x-4">
                 <Link
-                  to="/inquire"
+                  to="/customer/login"
                   className="bg-white text-eventease-600 hover:bg-gray-100 font-medium text-lg px-8 py-3 rounded-md transition-colors"
                 >
-                  Submit an Inquiry
+                  Submit an Inquiry / Get Started
                 </Link>
                 <Link
                   to="/organizer/login"
-                  className="border border-white/30 bg-white/10 hover:bg-white/20 font-medium text-lg px-8 py-3 rounded-md transition-colors"
+                  className="border border-white/50 hover:bg-white/10 backdrop-blur-sm text-white font-medium text-lg px-8 py-3 rounded-md transition-colors"
                 >
-                  I'm a Service Provider
+                  Are You an Organizer?
                 </Link>
               </div>
             </motion.div>

@@ -1,45 +1,40 @@
+import * as React from 'react';
+import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
+
+// UI Components
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
-import { AnimatePresence } from "framer-motion";
 
 // Pages
-import Home from "./pages/Home";
-import InquiryForm from "./pages/InquiryForm";
-import OrganizerLogin from "./pages/OrganizerLogin";
-import OrganizerDashboard from "./pages/OrganizerDashboard";
-import QuotePage from "./pages/QuotePage";
+import Home from './pages/Home';
+import QuotePage from './pages/QuotePage';
+import InquiryForm from './pages/InquiryForm';
+import CustomerLogin from './pages/CustomerLogin';
+import CustomerDashboard from './pages/CustomerDashboard';
+import OrganizerLogin from './pages/OrganizerLogin';
+import OrganizerDashboard from './pages/OrganizerDashboard';
 import NotFound from "./pages/NotFound";
 
-// Auth Context
-import { AuthProvider } from "./contexts/AuthContext";
-
-const queryClient = new QueryClient();
-
-const App = () => (
-  <QueryClientProvider client={queryClient}>
+function App() {
+  return (
     <TooltipProvider>
-      <Toaster />
-      <Sonner />
-      <AuthProvider>
-        <BrowserRouter>
-          <AnimatePresence mode="wait">
-            <Routes>
-              <Route path="/" element={<Home />} />
-              <Route path="/inquire" element={<InquiryForm />} />
-              <Route path="/organizer/login" element={<OrganizerLogin />} />
-              <Route path="/organizer/dashboard" element={<OrganizerDashboard />} />
-              <Route path="/quote/:eventId" element={<QuotePage />} />
-              {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
-              <Route path="*" element={<NotFound />} />
-            </Routes>
-          </AnimatePresence>
-        </BrowserRouter>
-      </AuthProvider>
+      <Router>
+        <Toaster />
+        <Sonner />
+        <Routes>
+          <Route path="/" element={<Home />} />
+          <Route path="/quote/:eventId" element={<QuotePage />} />
+          <Route path="/customer/login" element={<CustomerLogin />} />
+          <Route path="/customer/dashboard" element={<CustomerDashboard />} />
+          <Route path="/organizer/login" element={<OrganizerLogin />} />
+          <Route path="/organizer/dashboard" element={<OrganizerDashboard />} />
+          <Route path="/submit-inquiry" element={<InquiryForm />} />
+          <Route path="*" element={<NotFound />} />
+        </Routes>
+      </Router>
     </TooltipProvider>
-  </QueryClientProvider>
-);
+  );
+}
 
 export default App;

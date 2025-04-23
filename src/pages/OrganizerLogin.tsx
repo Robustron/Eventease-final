@@ -1,11 +1,19 @@
-
 import { useState, FormEvent } from "react";
-import { motion } from "framer-motion";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import { useToast } from "@/components/ui/use-toast";
+// --- Firebase Imports ---
+import { auth, db } from '@/firebaseConfig'; 
+import { signInWithEmailAndPassword, signOut, createUserWithEmailAndPassword } from 'firebase/auth'; 
+import { doc, getDoc, setDoc } from 'firebase/firestore';
+// --- UI Imports ---
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card"; 
+import { Loader2 } from 'lucide-react';
 
 const OrganizerLogin = () => {
   const navigate = useNavigate();
@@ -17,6 +25,7 @@ const OrganizerLogin = () => {
   const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [isRegistering, setIsRegistering] = useState(false);
   
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -32,18 +41,62 @@ const OrganizerLogin = () => {
       } catch (error) {
         toast({
           title: "Login Failed",
-          description: "Invalid email or password. Please try again.",
+          description: (error instanceof Error) ? error.message : "Invalid email or password. Please try again.",
           variant: "destructive",
         });
       }
     } else {
-      // Registration would normally be handled here
-      // For now, we'll show a toast message
-      toast({
-        title: "Registration Not Available",
-        description: "This is a demo. Please use the login option.",
-        variant: "destructive",
-      });
+      if (password !== confirmPassword) {
+        toast({
+          title: "Registration Failed",
+          description: "Passwords do not match.",
+          variant: "destructive",
+        });
+        return;
+      }
+      
+      setIsRegistering(true);
+      try {
+        const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+        const user = userCredential.user;
+        
+        const userDocRef = doc(db, "users", user.uid);
+        await setDoc(userDocRef, {
+          uid: user.uid,
+          email: user.email,
+          role: 'organizer',
+          phone: phone,
+          createdAt: new Date(),
+        });
+        
+        setIsRegistering(false);
+        toast({
+          title: "Registration Successful",
+          description: "Your organizer account has been created. Please log in.",
+        });
+        setIsLoginMode(true);
+        setEmail("");
+        setPhone("");
+        setPassword("");
+        setConfirmPassword("");
+        
+      } catch (error: any) {
+        setIsRegistering(false);
+        let errorMessage = "An unexpected error occurred. Please try again.";
+        if (error.code === 'auth/email-already-in-use') {
+          errorMessage = "This email address is already registered.";
+        } else if (error.code === 'auth/weak-password') {
+          errorMessage = "Password should be at least 6 characters long.";
+        } else if (error instanceof Error) {
+            errorMessage = error.message;
+        }
+        console.error("Registration Error:", error);
+        toast({
+          title: "Registration Failed",
+          description: errorMessage,
+          variant: "destructive",
+        });
+      }
     }
   };
   
@@ -51,12 +104,7 @@ const OrganizerLogin = () => {
     <>
       <Navbar />
       
-      <motion.div
-        className="min-h-screen pt-24 pb-16 bg-gray-50"
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{ duration: 0.5 }}
-      >
+      <div className="min-h-screen pt-24 pb-16 bg-gray-50">
         <div className="container mx-auto px-4 md:px-6 py-8">
           <div className="max-w-md mx-auto">
             <div className="text-center mb-8">
@@ -71,7 +119,6 @@ const OrganizerLogin = () => {
             </div>
             
             <div className="bg-white rounded-lg shadow-md p-6 md:p-8">
-              {/* Tab selector */}
               <div className="flex mb-6 border-b">
                 <button
                   className={`flex-1 pb-2 text-center ${
@@ -110,7 +157,7 @@ const OrganizerLogin = () => {
                     required
                   />
                   <p className="text-xs text-gray-500 mt-1">
-                    For demo, use "organizer@eventease.com"
+                    Please enter your email address.
                   </p>
                 </div>
                 
@@ -145,7 +192,7 @@ const OrganizerLogin = () => {
                     required
                   />
                   <p className="text-xs text-gray-500 mt-1">
-                    For demo, use "password"
+                    {isLoginMode ? 'Please enter your password.' : 'Password must be at least 6 characters.'}
                   </p>
                 </div>
                 
@@ -177,9 +224,9 @@ const OrganizerLogin = () => {
                 <button
                   type="submit"
                   className="btn-primary w-full"
-                  disabled={isLoading}
+                  disabled={isLoginMode ? isLoading : isRegistering}
                 >
-                  {isLoading
+                  {(isLoginMode ? isLoading : isRegistering)
                     ? "Please wait..."
                     : isLoginMode
                     ? "Login"
@@ -199,7 +246,6 @@ const OrganizerLogin = () => {
                   </p>
                 </div>
                 
-                {/* OAuth Providers Section - Just UI, not functional */}
                 <div className="mt-6">
                   <div className="relative">
                     <div className="absolute inset-0 flex items-center">
@@ -246,7 +292,7 @@ const OrganizerLogin = () => {
             </div>
           </div>
         </div>
-      </motion.div>
+      </div>
       
       <Footer />
     </>

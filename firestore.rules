@@ -1,0 +1,142 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // This rule allows anyone with your Firestore database reference to view, edit,
+    // and delete all data in your Firestore database. It is useful for getting
+    // started, but it is configured to expire after 30 days because it
+    // leaves your app open to attackers. At that time, all client
+    // requests to your Firestore database will be denied.
+    //
+    // Make sure to write security rules for your app before that time, or else
+    // all client requests to your Firestore database will be denied until you Update
+    // your rules
+    match /{document=**} {
+      allow read, write: if request.time < timestamp.date(2025, 5, 20);
+    }
+
+    // Users can read/update their own profile, organizers can potentially read basic info?
+    match /users/{userId} {
+      // Anyone authenticated can read user profiles (adjust if needed, e.g., only read specific fields)
+      allow read: if request.auth != null;
+
+      // Allow user to create their own profile document ONLY IF it matches their auth UID
+      // Ensure role is either 'client' or 'organizer', and createdAt is set by server
+      allow create: if request.auth != null && request.auth.uid == userId
+                       && request.resource.data.uid == request.auth.uid
+                       && request.resource.data.role in ['client', 'organizer']
+                       // Add other required fields check: email? displayName?
+                       && request.resource.data.email == request.auth.token.email // Example: Ensure email matches token
+                       && request.resource.data.createdAt == request.time;
+
+      // Allow user to update their own profile ONLY
+      // Disallow changing UID or Role or createdAt after creation
+      allow update: if request.auth != null && request.auth.uid == userId
+                       && request.resource.data.uid == resource.data.uid
+                       && request.resource.data.role == resource.data.role
+                       && request.resource.data.createdAt == resource.data.createdAt;
+                       // Allow specific fields to be updated, e.g., displayName
+
+      // Disallow deleting user profiles for now
+      allow delete: if false;
+    }
+
+    // Inquiries
+    match /inquiries/{inquiryId} {
+      // Helper function to check user role from their own user document
+      function isUserRole(role) {
+        return request.auth != null && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == role;
+      }
+
+      // Helper function to check if user is the client for this inquiry (using resource data)
+      function isClientOwner(inquiryData) {
+        return request.auth != null && request.auth.uid == inquiryData.clientId;
+      }
+
+      // Helper function to check if user is the quoting organizer (if quote exists)
+      function isQuotingOrganizer(inquiryData) {
+        return request.auth != null && inquiryData.quote != null && request.auth.uid == inquiryData.quote.organizerId;
+      }
+
+      // Helper function to check if user is *any* organizer
+       function isOrganizer() {
+        return request.auth != null && isUserRole('organizer');
+       }
+
+      // Allow read access: Client owner OR any organizer
+      allow read: if request.auth != null && (isClientOwner(resource.data) || isOrganizer());
+
+      // Allow client to create inquiry
+      // - Must be logged in and have 'client' role
+      // - Must set clientId to their own UID
+      // - Must set status to 'new'
+      // - Must provide required fields (checked implicitly by required fields in rules below)
+      // - Must set createdAt/updatedAt timestamps correctly
+      allow create: if request.auth != null && isUserRole('client')
+                       && request.resource.data.clientId == request.auth.uid
+                       && request.resource.data.status == 'new'
+                       && request.resource.data.quote == null // Cannot create with a quote
+                       && request.resource.data.organizerId == null // Cannot create with an organizer assigned
+                       && request.resource.data.createdAt == request.time // Ensure server timestamps
+                       && request.resource.data.updatedAt == request.time;
+                       // Add checks for required fields like eventType, eventDate, etc.
+                       // && request.resource.data.eventType is string
+                       // && request.resource.data.eventDate is timestamp
+                       // && ...
+
+      // Allow updates (more granular control)
+      allow update: if request.auth != null && (
+        // --- Client Actions ---
+        // Action: Accept Quote
+        (
+          isClientOwner(resource.data) && // Must be the client owner
+          resource.data.status == 'quoted' && // Can only accept if already quoted
+          request.resource.data.status == 'accepted' && // Must be changing status to 'accepted'
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'updatedAt']) && // Only status and timestamp can change
+          request.resource.data.updatedAt == request.time // Ensure server timestamp
+        ) ||
+        // Action: Decline Quote
+        (
+          isClientOwner(resource.data) && // Must be the client owner
+          resource.data.status == 'quoted' && // Can only decline if already quoted
+          request.resource.data.status == 'declined' && // Must be changing status to 'declined'
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'updatedAt']) && // Only status and timestamp can change
+          request.resource.data.updatedAt == request.time // Ensure server timestamp
+        ) ||
+        // Action: Cancel Inquiry (Example: Client can cancel if 'new' or 'quoted')
+        (
+          isClientOwner(resource.data) && // Must be the client owner
+          resource.data.status in ['new', 'quoted'] && // Allow cancelling before acceptance
+           request.resource.data.status == 'cancelled' && // Must be changing to 'cancelled'
+           request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'updatedAt']) && // Only status and timestamp can change
+           request.resource.data.updatedAt == request.time // Ensure server timestamp
+        ) ||
+        // --- Organizer Actions ---
+        // Action: Send Quote
+        (
+          isOrganizer() && // Must be an organizer
+          resource.data.status == 'new' && // Can only quote if 'new'
+          request.resource.data.status == 'quoted' && // Must be changing status to 'quoted'
+          request.resource.data.quote != null && // Quote object must be provided
+          request.resource.data.quote.organizerId == request.auth.uid && // Organizer ID in quote must match sender
+          request.resource.data.organizerId == request.auth.uid && // Organizer ID on inquiry must match sender
+          // Check required quote fields exist and have correct types
+          request.resource.data.quote.organizerName is string &&
+          request.resource.data.quote.amount is number &&
+          request.resource.data.quote.currency is string &&
+          request.resource.data.quote.message is string &&
+          request.resource.data.quote.submittedAt == request.time && // Ensure server timestamp for quote submission
+          // Ensure only relevant fields are changed
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'quote', 'organizerId', 'updatedAt']) &&
+          request.resource.data.updatedAt == request.time // Ensure server timestamp for inquiry update
+        )
+        // Add other potential organizer updates here if needed
+        // (e.g., modifying their own quote before acceptance - would need more complex rules)
+      );
+
+      // Generally disallow deletion, perhaps allow for admins later
+      allow delete: if false;
+    }
+  }
+}
