@@ -27,6 +27,7 @@ import { Textarea } from "@/components/ui/textarea"; // Added for QuoteForm
 
 // --- Firebase Imports ---
 import { db } from "@/firebaseConfig";
+import { auth } from "@/firebaseConfig";
 import { collection, query, onSnapshot, Timestamp, orderBy, doc, updateDoc, serverTimestamp } from "firebase/firestore"; // Added Firestore functions
 
 // --- Data Types ---
@@ -64,25 +65,50 @@ interface Inquiry {
 
 // --- Placeholder function to simulate sending a quote (Update needed later) ---
 // Keep existing sendInquiryQuote placeholder for now
+// Update sendInquiryQuote with actual Firestore update logic
 const sendInquiryQuote = async (inquiryId: string, quote: { amount: number, currency: string, message: string }): Promise<boolean> => {
-  console.log("Simulating sending quote for inquiry:", inquiryId, quote);
+  const currentUser = auth.currentUser;
+  if (!currentUser) {
+    console.error("Error: No authenticated user found when trying to send quote.");
+    // Consider throwing an error or showing a toast message here
+    return false;
+  }
+
+  const organizerId = currentUser.uid;
+  // Use displayName if available, otherwise fallback or fetch profile
+  const organizerName = currentUser.displayName || "EventEase Organizer"; 
+
+  console.log(`Attempting to send quote for inquiry: ${inquiryId} by organizer: ${organizerId}`);
   const inquiryRef = doc(db, "inquiries", inquiryId);
+
+  // Construct the full quote object as required by security rules
+  const quoteDataForFirestore: Quote = { // Ensure it matches the Quote interface
+     organizerId: organizerId,
+     organizerName: organizerName,
+     amount: quote.amount,
+     currency: quote.currency,
+     message: quote.message,
+     submittedAt: serverTimestamp() as Timestamp // Use serverTimestamp
+  };
+
+  // Construct the data object for updateDoc, including all required fields
+  const updateData = {
+      status: "quoted" as const,
+      quote: quoteDataForFirestore,
+      organizerId: organizerId, // Set top-level organizerId
+      updatedAt: serverTimestamp() // Set top-level updatedAt
+  };
+
   try {
-      await updateDoc(inquiryRef, {
-          status: "quoted",
-          quote: { // Structure according to Quote interface
-             amount: quote.amount,
-             currency: quote.currency,
-             message: quote.message,
-             submittedAt: serverTimestamp()
-             // organizerId/Name would be added here from logged-in organizer context
-          },
-          updatedAt: serverTimestamp()
-      });
-       await new Promise((resolve) => setTimeout(resolve, 1000)); // Simulate delay
+      // Perform the actual update
+      await updateDoc(inquiryRef, updateData);
+      console.log(`Successfully updated inquiry ${inquiryId} status to quoted.`);
       return true;
   } catch (error) {
-      console.error("Error updating inquiry status to quoted:", error);
+      // Log the specific Firestore error
+      console.error(`Error updating inquiry ${inquiryId} status to quoted:`, error);
+      // You might want to check the error type (e.g., instanceof FirebaseError)
+      // and potentially return a more specific error message or re-throw.
       return false;
   }
 };
@@ -390,7 +416,7 @@ const OrganizerDashboard: React.FC = () => {
         toast({
           title: "Quote Sent",
           description: "Your quote has been successfully sent.",
-          variant: "success",
+          variant: "default",
         });
         handleCloseQuoteDialog(); // Close dialog on success
       } else {
