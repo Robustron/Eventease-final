@@ -22,7 +22,7 @@ import {
 } from "@/components/ui/dialog";
 
 // Firebase imports
-import { db } from "@/firebaseConfig";
+import { db, auth } from "@/firebaseConfig";
 import { collection, addDoc, Timestamp, serverTimestamp } from "firebase/firestore";
 
 const eventTypes = [
@@ -90,8 +90,23 @@ const InquiryForm = () => {
 
     setIsSubmitting(true);
     
+    // Get current user before the try block
+    const currentUser = auth.currentUser; 
+
+    // Add check for logged-in user
+    if (!currentUser) {
+        toast({
+            title: "Authentication Required",
+            description: "You must be logged in to submit an inquiry.",
+            variant: "destructive",
+        });
+        setIsSubmitting(false); // Stop submission
+        return; // Exit the function
+    }
+
     try {
        const inquiryData = {
+         clientId: currentUser.uid,
          eventType: formData.eventType,
          eventDate: formData.eventDate ? Timestamp.fromDate(formData.eventDate) : null,
          description: enhancedDescription ?? formData.description,
@@ -107,6 +122,7 @@ const InquiryForm = () => {
          organizerId: null,
        };
 
+      console.log("Submitting Inquiry Data:", inquiryData); // Optional: Log the data being sent
       const docRef = await addDoc(collection(db, "inquiries"), inquiryData);
       
       toast({
@@ -133,7 +149,7 @@ const InquiryForm = () => {
       console.error("Error submitting inquiry to Firebase:", error);
       toast({
         title: "Submission Failed",
-        description: "Could not save your inquiry to the database. Please try again.",
+        description: `Could not save your inquiry. Error: ${error.message || 'Please try again.'}`,
         variant: "destructive",
       });
     } finally {
