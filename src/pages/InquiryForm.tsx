@@ -1,4 +1,4 @@
-import { useState, FormEvent } from "react";
+import { useState, FormEvent, useRef, useEffect } from "react";
 import { motion } from "framer-motion";
 import { Link, useNavigate } from "react-router-dom";
 import Navbar from "@/components/Navbar";
@@ -6,10 +6,20 @@ import Footer from "@/components/Footer";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { format } from "date-fns";
-import { Calendar as CalendarIcon, Loader2 } from "lucide-react";
+import { Calendar as CalendarIcon, Loader2, Sparkles, Send } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/use-toast";
+import { GoogleGenerativeAI, ChatSession } from "@google/generative-ai";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
 
 // Firebase imports
 import { db } from "@/firebaseConfig";
@@ -33,7 +43,22 @@ const InquiryForm = () => {
   const navigate = useNavigate();
   const [currentStep, setCurrentStep] = useState(1);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isAiEnhancing, setIsAiEnhancing] = useState(false);
+  const [showAiModal, setShowAiModal] = useState(false);
+  const [enhancedDescription, setEnhancedDescription] = useState<string | null>(null);
+  const [aiInteractionLog, setAiInteractionLog] = useState<string[]>([]);
+  const [aiChatSession, setAiChatSession] = useState<ChatSession | null>(null);
+  const [aiRefinementInput, setAiRefinementInput] = useState("");
+  const [isAiRefining, setIsAiRefining] = useState(false);
   
+  const chatContainerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (chatContainerRef.current) {
+      chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
+    }
+  }, [aiInteractionLog]);
+
   const [formData, setFormData] = useState({
     eventType: "",
     eventDate: null as Date | null,
@@ -43,6 +68,7 @@ const InquiryForm = () => {
     email: "",
     phone: "",
     expectedGuests: "",
+    budgetRange: "",
   });
   
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
@@ -54,7 +80,7 @@ const InquiryForm = () => {
     e.preventDefault();
     
     if (currentStep !== 3) {
-        toast({ title: "Incomplete Form", description: "Please complete all steps.", variant: "warning" });
+        toast({ title: "Incomplete Form", description: "Please complete all steps.", variant: "destructive" });
         return;
     }
     if (!formData.name || !formData.email || !formData.phone) {
@@ -68,7 +94,7 @@ const InquiryForm = () => {
        const inquiryData = {
          eventType: formData.eventType,
          eventDate: formData.eventDate ? Timestamp.fromDate(formData.eventDate) : null,
-         description: formData.description,
+         description: enhancedDescription ?? formData.description,
          location: formData.location, 
          name: formData.name,
          email: formData.email,
@@ -86,7 +112,7 @@ const InquiryForm = () => {
       toast({
         title: "Inquiry Submitted",
         description: "Your event inquiry has been successfully submitted!",
-        variant: "success",
+        variant: "default",
       });
 
       setFormData({
@@ -98,8 +124,10 @@ const InquiryForm = () => {
         email: "",
         phone: "",
         expectedGuests: "",
+        budgetRange: "",
       });
       setCurrentStep(1);
+      setEnhancedDescription(null);
 
     } catch (error) {
       console.error("Error submitting inquiry to Firebase:", error);
@@ -113,12 +141,179 @@ const InquiryForm = () => {
     }
   };
   
+  const handleEnhanceWithAi = async () => {
+      if (!formData.eventType || !formData.eventDate || !formData.description || !formData.location) {
+          toast({
+              title: "Missing Information",
+              description: "Please provide Event Type, Date, Location, and a brief Description before enhancing.",
+              variant: "destructive",
+          });
+          return;
+      }
+
+      const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+      if (!apiKey) {
+          toast({
+              title: "API Key Missing",
+              description: "Gemini API key is not configured. Please set VITE_GEMINI_API_KEY in your .env file.",
+              variant: "destructive",
+          });
+          return;
+      }
+
+      setIsAiEnhancing(true);
+      setIsAiRefining(true);
+      setShowAiModal(true);
+      setAiInteractionLog(["AI: Generating initial enhancement..."]);
+      setEnhancedDescription(null);
+      setAiChatSession(null);
+
+      try {
+          const genAI = new GoogleGenerativeAI(apiKey);
+          const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+          const chat = model.startChat({
+               history: [
+                 {
+                   role: "user",
+                   parts: [{ text: "You are a helpful event planning assistant. Your goal is to refine event descriptions based on user feedback. Keep responses concise and focused on the description." }],
+                 },
+                 {
+                   role: "model",
+                   parts: [{ text: "Okay, I understand. I'm ready to help enhance the event description. Please provide the initial details." }],
+                 },
+               ],
+          });
+          setAiChatSession(chat);
+
+          const dateString = formData.eventDate ? format(formData.eventDate, "PPP") : "Not specified";
+          const initialUserMessage = `System Preamble: You are "Eve," an AI Event Visionary & Experience Designer. Your goal is to take raw event details and transform them into a compelling, imaginative, and practical event concept. You think creatively, consider the atmosphere and guest experience, and provide tangible starting points, including budget considerations.
+
+**User Provided Foundation:**
+*   **Event Occasion:** ${formData.eventType}
+*   **Target Date:** ${dateString}
+*   **Proposed Setting:** ${formData.location}
+*   **Guest Estimate:** ${formData.expectedGuests || 'Not specified - Assume small group unless description suggests otherwise'}
+*   **Ballpark Budget (INR ₹):** ${formData.budgetRange || 'Flexible / To be determined'}
+*   **Initial Idea / Vibe:** ${formData.description}
+
+**Your Creative Mandate:**
+Based on the user's foundation, architect a preliminary vision for this event. Go beyond simple suggestions; aim to inspire!
+
+**1. Craft an Evocative Vision Statement:**
+*   Don't just rewrite the description. Imagine the peak moment of the event. What does it feel like, sound like, look like?
+*   Distill the user's initial idea into a compelling narrative or thematic concept. Give it a hook or a captivating name/theme idea (even if preliminary).
+*   Infuse it with sensory details and emotion relevant to the Event Occasion and Initial Idea.
+
+**2. Develop an "Experience Blueprint" (Key Elements & Activities):**
+*   Based on the Vision Statement and available details (especially Event Occasion, Setting, Ballpark Budget), propose 3-5 interconnected elements or activities that bring the vision to life.
+*   Think holistically: Consider flow, atmosphere, engagement, and potential "wow" factors.
+*   Examples: Suggest specific types of entertainment (live music genre, specific type of performer, interactive game), unique catering ideas (themed food stations, signature cocktail concept), decor concepts (lighting style, color palette, key pieces), or special moments (a planned toast, a unique guest interaction).
+*   Briefly justify why each element fits the vision and is likely feasible within the general budget constraints.
+
+**3. Sketch a Preliminary Budget Allocation:**
+*   Based on the Ballpark Budget (even if vague) and the Experience Blueprint, provide a suggested, hypothetical percentage or range breakdown for key event categories (e.g., Venue: 20-30%, F&B: 30-40%, Entertainment: 15-25%, Decor: 10-20%, Contingency: 10-15%).
+*   Typical categories include: Venue/Location Fees, Food & Beverage, Entertainment/Activities, Decor/Ambiance, Staffing/Service, Contingency (Essential! Suggest 10-15%).
+*   State clearly that this is a preliminary estimate to guide thinking, heavily dependent on specific choices. If the budget is "Flexible," provide a breakdown for a modest interpretation first, perhaps noting where costs could scale up.
+
+**4. Initiate the Refinement Dialogue (CRITICAL):**
+*   End by explicitly inviting collaboration to flesh out the details. Frame it as moving from concept to concrete plan.
+*   Ask targeted questions based on the concept you just presented, such as:
+    *   "Does this initial vision of a '[Your Theme Idea]' resonate with you? What aspects excite you most?"
+    *   "Regarding the proposed [Specific Activity/Element], how does that align with your priorities? Are there specific guest preferences (age range, interests) we should focus on?"
+    *   "The budget sketch assumes [mention a key assumption, e.g., 'moderate F&B spending']. Are there areas where you'd prefer to allocate more or less resource (e.g., is high-end catering more critical than elaborate decor)?"
+    *   "To make this even more tailored, could you share more about the desired overall atmosphere (e.g., relaxed & casual, sophisticated & elegant, high-energy & fun)?"
+    *   "Are there any 'must-haves' or absolute 'no-gos' we should incorporate from the start?"
+
+Now, generate the Vision Statement, Experience Blueprint, Budget Allocation Sketch, and the Refinement Dialogue questions based *only* on the user's details provided above.`;
+
+          const result = await chat.sendMessage(initialUserMessage);
+          const response = result.response;
+          const text = response.text();
+
+          setEnhancedDescription(text);
+          setAiInteractionLog(prev => [prev[0].replace("Generating initial enhancement...", `Initial request sent.`), `AI: ${text}`]);
+
+      } catch (error) {
+          console.error("Error starting AI chat:", error);
+          toast({
+              title: "AI Initialization Failed",
+              description: "Could not start the enhancement session. Please try again later.",
+              variant: "destructive",
+          });
+          setShowAiModal(false);
+          setAiChatSession(null);
+      } finally {
+          setIsAiRefining(false);
+          setIsAiEnhancing(false);
+      }
+  };
+
+  const sendRefinementRequest = async () => {
+    if (!aiRefinementInput.trim() || !aiChatSession || isAiRefining) {
+      return;
+    }
+
+    const userMessage = aiRefinementInput.trim();
+    setAiInteractionLog(prev => [...prev, `USER: ${userMessage}`]);
+    setAiRefinementInput("");
+    setIsAiRefining(true);
+
+    try {
+      const result = await aiChatSession.sendMessage(userMessage);
+      const response = result.response;
+      const text = response.text();
+
+      setEnhancedDescription(text);
+      setAiInteractionLog(prev => [...prev, `AI: ${text}`]);
+
+    } catch (error) {
+       console.error("Error sending refinement to AI:", error);
+       toast({
+           title: "AI Refinement Failed",
+           description: "Could not get refinement from AI. Please try again.",
+           variant: "destructive",
+       });
+       setAiInteractionLog(prev => [...prev, `SYSTEM: Error receiving AI response.`]);
+    } finally {
+       setIsAiRefining(false);
+    }
+  };
+
+  const acceptAiDescription = () => {
+      if (enhancedDescription) {
+          setFormData(prev => ({ ...prev, description: enhancedDescription }));
+          toast({ title: "Description Updated", description: "AI-enhanced description applied." });
+      }
+      setShowAiModal(false);
+      setAiInteractionLog([]);
+  };
+
+  const cancelAiEnhancement = () => {
+    setShowAiModal(false);
+    setEnhancedDescription(null);
+    setAiInteractionLog([]);
+    setAiChatSession(null);
+    setIsAiEnhancing(false);
+    setIsAiRefining(false);
+    setAiRefinementInput("");
+  };
+
   const nextStep = () => {
     if (currentStep === 1) {
-      if (!formData.eventType || !formData.eventDate || !formData.description) {
+      if (!formData.eventType || !formData.eventDate) {
         toast({
           title: "Missing Information",
-          description: "Please fill in all the required fields before proceeding",
+          description: "Please select an Event Type and Date before proceeding",
+          variant: "destructive",
+        });
+        return;
+      }
+    }
+    if (currentStep === 2) {
+      if (!formData.location) {
+        toast({
+          title: "Missing Information",
+          description: "Please enter the Event Location before proceeding",
           variant: "destructive",
         });
         return;
@@ -158,13 +353,13 @@ const InquiryForm = () => {
               </div>
               <div className="flex justify-between mt-2 text-sm">
                 <div className={currentStep >= 1 ? 'text-eventease-600 font-medium' : 'text-gray-500'}>
-                  Event Details
+                  Event Basics
                 </div>
                 <div className={currentStep >= 2 ? 'text-eventease-600 font-medium' : 'text-gray-500'}>
-                  Location
+                  Location & Guests
                 </div>
                 <div className={currentStep >= 3 ? 'text-eventease-600 font-medium' : 'text-gray-500'}>
-                  Contact Info
+                  Description & Contact
                 </div>
               </div>
             </div>
@@ -235,26 +430,9 @@ const InquiryForm = () => {
                       </Popover>
                     </div>
                     
-                    <div>
-                      <div className="flex justify-between items-center mb-1">
-                        <label htmlFor="description" className="block text-sm font-medium text-gray-700">
-                          Event Description*
-                        </label>
-                      </div>
-                      <textarea
-                        id="description"
-                        name="description"
-                        rows={5}
-                        className="input-field w-full"
-                        placeholder="Describe your event, requirements, and any special considerations..."
-                        value={formData.description}
-                        onChange={handleChange}
-                        required
-                      ></textarea>
-                    </div>
                     <div className="flex justify-end pt-4">
                        <Button type="button" onClick={nextStep} className="btn-primary">
-                           Next: Location
+                           Next: Location & Guests
                        </Button>
                     </div>
                   </motion.div>
@@ -299,20 +477,26 @@ const InquiryForm = () => {
                       />
                     </div>
                     
-                    <div className="bg-gray-100 rounded-lg p-4 text-center">
-                      <p className="text-gray-500 mb-2">Location Map Preview</p>
-                      <div className="bg-gray-200 h-48 rounded flex items-center justify-center">
-                        <p className="text-gray-400">
-                          Map would appear here based on location input
-                        </p>
-                      </div>
-                      <p className="text-xs text-gray-500 mt-2">
-                        Enter a specific address above for an accurate map view
-                      </p>
+                    <div>
+                      <label htmlFor="budgetRange" className="block text-sm font-medium text-gray-700 mb-1">
+                        Estimated Budget Range (Optional, in INR ₹)
+                      </label>
+                      <input
+                        type="text"
+                        id="budgetRange"
+                        name="budgetRange"
+                        className="input-field w-full"
+                        placeholder="e.g., ₹50,000 - ₹1,00,000, Flexible, etc."
+                        value={formData.budgetRange}
+                        onChange={handleChange}
+                      />
                     </div>
+                    
                     <div className="flex justify-between pt-4">
                        <Button type="button" variant="outline" onClick={prevStep}>Back</Button>
-                       <Button type="button" onClick={nextStep} className="btn-primary">Next: Contact Info</Button>
+                       <Button type="button" onClick={nextStep} className="btn-primary">
+                           Next: Description & Contact
+                       </Button>
                     </div>
                   </motion.div>
                 )}
@@ -324,6 +508,41 @@ const InquiryForm = () => {
                     animate={{ opacity: 1, x: 0 }}
                     transition={{ duration: 0.3 }}
                   >
+                    <div>
+                      <div className="flex justify-between items-center mb-1">
+                        <label htmlFor="description" className="block text-sm font-medium text-gray-700">
+                          Event Description*
+                        </label>
+                      </div>
+                      <textarea
+                        id="description"
+                        name="description"
+                        rows={5}
+                        className="input-field w-full"
+                        placeholder="Describe your event, requirements, and any special considerations..."
+                        value={formData.description}
+                        onChange={handleChange}
+                        required
+                      ></textarea>
+                      <div className="mt-2 text-right">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={handleEnhanceWithAi}
+                          disabled={isAiEnhancing || !formData.description}
+                          className="text-sm"
+                         >
+                           {isAiEnhancing ? (
+                             <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                           ) : (
+                             <Sparkles className="mr-2 h-4 w-4 text-yellow-500" />
+                           )}
+                           Enhance with AI
+                         </Button>
+                      </div>
+                    </div>
+                    
                     <div>
                       <label htmlFor="name" className="block text-sm font-medium text-gray-700 mb-1">
                         Your Name*
@@ -403,6 +622,84 @@ const InquiryForm = () => {
         </div>
       </motion.div>
       
+      <Dialog open={showAiModal} onOpenChange={(open) => !open && cancelAiEnhancement()}>
+       <DialogContent className="sm:max-w-[600px]">
+         <DialogHeader>
+           <DialogTitle>Enhance Event Description with AI</DialogTitle>
+           <DialogDescription>
+             Review the AI-generated description below. You can accept it or ask for refinements.
+           </DialogDescription>
+         </DialogHeader>
+         <div
+           ref={chatContainerRef}
+           className="mt-4 space-y-3 max-h-[50vh] overflow-y-auto p-4 border rounded bg-gray-50/50"
+         >
+            {isAiRefining && aiInteractionLog.length <= 1 && (
+                 <div className="flex items-center justify-center p-4">
+                     <Loader2 className="h-6 w-6 animate-spin text-gray-400" />
+                     <span className="ml-2 text-gray-500">Generating initial description...</span>
+                  </div>
+              )}
+             {aiInteractionLog.slice(1).map((msg, index) => (
+               <div key={index} className={`flex ${msg.startsWith('AI:') ? 'justify-start' : 'justify-end'}`}>
+                 <p className={`text-sm p-2 rounded-lg max-w-[85%] whitespace-pre-wrap ${
+                   msg.startsWith('AI:')
+                     ? 'bg-blue-100 text-blue-900'
+                     : 'bg-eventease-100 text-eventease-900'
+                 }`}>
+                   {msg.substring(msg.indexOf(':') + 2)}
+                 </p>
+               </div>
+             ))}
+             {isAiRefining && aiInteractionLog.length > 1 && (
+               <div className="flex justify-start">
+                 <p className="text-sm p-2 rounded-lg bg-gray-200 animate-pulse">
+                   AI thinking...
+                 </p>
+               </div>
+             )}
+         </div>
+
+         {/* Input area for refinement */}
+         <div className="mt-4 flex gap-2 items-end"> {/* Ensure items align nicely */}
+             <Textarea
+               placeholder="Ask for changes (e.g., 'Make it more formal', 'Add details about the birthday person')..."
+               value={aiRefinementInput}
+               onChange={(e) => setAiRefinementInput(e.target.value)}
+               onKeyDown={(e) => {
+                 if (e.key === 'Enter' && !e.shiftKey) {
+                   e.preventDefault(); // Prevent newline on Enter
+                   sendRefinementRequest();
+                 }
+               }}
+               rows={2}
+               className="flex-1 resize-none"
+               disabled={isAiRefining || !aiChatSession} // Disable while refining or if chat not ready
+             />
+             <Button
+               onClick={sendRefinementRequest}
+               disabled={isAiRefining || !aiRefinementInput.trim() || !aiChatSession} // Disable if no input, refining, or no chat
+               size="icon" // Make button square
+               aria-label="Send refinement request"
+               className="shrink-0" // Prevent button from shrinking
+             >
+               {isAiRefining ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+             </Button>
+         </div>
+
+         <DialogFooter className="mt-6 gap-2 sm:justify-between">
+             <Button variant="outline" onClick={cancelAiEnhancement}>Cancel</Button>
+             <Button
+               onClick={acceptAiDescription}
+               disabled={isAiRefining || !enhancedDescription} // Disable while refining or if no description generated yet
+               className="btn-primary"
+              >
+                Accept Current Description
+              </Button>
+         </DialogFooter>
+       </DialogContent>
+     </Dialog>
+
       <Footer />
     </>
   );
